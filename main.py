@@ -1,10 +1,21 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox, simpledialog, filedialog
 import os
 import subprocess
 import csv
 from PyPDF2 import PdfReader
 import sys
+import platform
+
+def get_csv_encoding():
+    system = platform.system()
+    if system == "Windows":
+        return "cp1252"
+    elif system == "Darwin":  # macOS
+        return "macroman"
+    else:
+        # Fallback auf UTF-8 für andere Betriebssysteme
+        return "utf-8"
 
 if getattr(sys, 'frozen', False):
     import pyi_splash
@@ -24,16 +35,21 @@ install_and_import("PyPDF2")
 
 def open_file_dialog(type_label, entry_widget):
     if type_label == "PDF":
-        filename = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
+        filename = filedialog.askopenfilename(
+            filetypes=[
+                ("PDF files", "*.pdf")
+                ])
     elif type_label == "CSV":
         filename = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+            defaultextension=".csv", filetypes=[
+                ("CSV files", "*.csv")
+                ]
         )
     elif type_label == "Word":
         filename = filedialog.askopenfilename(
             filetypes=[
-                ("Word Documents (*.docx)", "*.docx"),
                 ("Word Templates (*.dotx)", "*.dotx"),
+                ("Word Documents (*.docx)", "*.docx"),
                 ("All Files", "*"),
             ]
         )
@@ -45,10 +61,20 @@ def execute_script(pdf_path, csv_path, word_path):
     print("Datenverarbeitung starten...")
     pdf_text_lines, klasse = extract_data_from_pdf(pdf_path)
     processed_data = process_text(pdf_text_lines, klasse)
-    write_data_to_csv(processed_data, csv_path)
-    print("Daten wurden erfolgreich in CSV exportiert.")
-
-    messagebox.showinfo("Erfolg", "Daten wurden erfolgreich in CSV exportiert.")
+    try:
+        write_data_to_csv(processed_data, csv_path)
+        print("Daten wurden erfolgreich in CSV exportiert.")
+        messagebox.showinfo("Erfolg", "Daten wurden erfolgreich in CSV exportiert.")
+    except PermissionError:
+        retry = messagebox.askretrycancel(
+            "Berechtigungsfehler",
+            "Keine Berechtigung zum Speichern der Datei. Möchten Sie es erneut versuchen?",
+        )
+        if retry:
+            csv_path = filedialog.asksaveasfilename(
+                defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+            )
+            execute_script(pdf_path, csv_path, word_path)
 
     if word_path:
         try:
@@ -62,6 +88,10 @@ def execute_script(pdf_path, csv_path, word_path):
                 )  # Verwende 'xdg-open' auf Linux
         except Exception as e:
             print(f"Fehler beim Öffnen der Datei: {e}")
+            messagebox.showerror("Fehler beim Öffnen der Datei: {e}")
+    
+    # Programm beenden, nachdem Word geöffnet wurde
+    sys.exit()
 
 
 def close_application():
@@ -97,16 +127,17 @@ def process_text(text_lines, klasse):
 
 
 def write_data_to_csv(data, csv_path):
-    with open(csv_path, mode='w', newline='', encoding='cp437') as file:
+    encoding = get_csv_encoding()
+    with open(csv_path, mode='w', newline='', encoding=encoding) as file:
         writer = csv.writer(file, delimiter=';')
         writer.writerow(['Platz', 'Nachname', 'Vorname', 'Klasse'])
         for record in data:
-            # Konvertiere alle Datensätze in cp437, um Sonderzeichen korrekt zu behandeln
-            record_cp437 = [
-                item.encode('cp437', errors='replace').decode('cp437') if isinstance(item, str) else item
+            # Konvertiere alle Datensätze entsprechend des Encoders, um Sonderzeichen korrekt zu behandeln
+            record_encoded = [
+                item.encode(encoding, errors='replace').decode(encoding) if isinstance(item, str) else item
                 for item in record
             ]
-            writer.writerow(record_cp437)
+            writer.writerow(record_encoded)
 
 
 class App:
@@ -114,7 +145,7 @@ class App:
         # setting title
         root.title("ADAC-Ergebnislisten Converter")
         # setting window size
-        width = 400
+        width = 410
         height = 200
         screenwidth = root.winfo_screenwidth()
         screenheight = root.winfo_screenheight()
@@ -127,32 +158,32 @@ class App:
         root.geometry(alignstr)
         root.resizable(width=False, height=False)
 
-        self.pdf_entry = tk.Entry(root, width=50)
-        self.pdf_entry.place(x=240, y=60)
+        self.pdf_entry = tk.Entry(root, width=40)
+        self.pdf_entry.place(x=150, y=15)
         tk.Button(
             root,
             text="ADAC-Ergebnisliste",
             command=lambda: open_file_dialog("PDF", self.pdf_entry),
-        ).place(x=130, y=10)
+        ).place(x=10, y=10)
 
-        self.csv_entry = tk.Entry(root, width=50)
-        self.csv_entry.place(x=240, y=150)
+        self.csv_entry = tk.Entry(root, width=40)
+        self.csv_entry.place(x=150, y=55)
         tk.Button(
             root,
             text="CSV-Exportpfad",
             command=lambda: open_file_dialog("CSV", self.csv_entry),
-        ).place(x=140, y=40)
+        ).place(x=10, y=50)
 
-        self.word_entry = tk.Entry(root, width=50)
-        self.word_entry.place(x=240, y=240)
+        self.word_entry = tk.Entry(root, width=40)
+        self.word_entry.place(x=150, y=95)
         tk.Button(
             root,
             text="Word-Vorlage",
             command=lambda: open_file_dialog("Word", self.word_entry),
-        ).place(x=150, y=80)
+        ).place(x=10, y=90)
 
-        tk.Button(root, text="Ausführen", command=self.start_command).place(x=160, y=110)
-        tk.Button(root, text="Beenden", command=close_application).place(x=165, y=160)
+        tk.Button(root, text="Ausführen", command=self.start_command).place(x=150, y=130)
+        tk.Button(root, text="Beenden", command=close_application).place(x=150, y=160)
 
     def start_command(self):
         execute_script(

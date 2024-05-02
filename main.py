@@ -6,6 +6,8 @@ import csv
 from PyPDF2 import PdfReader
 import sys
 
+if getattr(sys, 'frozen', False):
+    import pyi_splash
 
 def install_and_import(package):
     try:
@@ -164,4 +166,6 @@ if __name__ == "__main__":
     root.lift()  # Fenster in den Vordergrund bringen
     root.attributes('-topmost', True)  # Setze das Fenster ganz nach oben
     root.after_idle(root.attributes, '-topmost', False)  # Setze das Fenster wieder normal, wenn das Fenster idle ist
+    if getattr(sys, 'frozen', False):
+        pyi_splash.close()
     root.mainloop()

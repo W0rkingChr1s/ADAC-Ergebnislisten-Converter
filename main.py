@@ -6,6 +6,13 @@ import csv
 from PyPDF2 import PdfReader
 import sys
 import platform
+import configparser
+
+def read_settings():
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+    extensions = config['ClubExtensions']['extensions'].split(', ')
+    return extensions
 
 def get_csv_encoding():
     system = platform.system()
@@ -58,10 +65,18 @@ def open_file_dialog(type_label, entry_widget):
 
 
 def execute_script(pdf_path, csv_path, word_path):
-    print("Datenverarbeitung starten...")
+    extensions = read_settings()
+    
+    # Extrahiere Daten aus der PDF-Datei
     pdf_text_lines, klasse = extract_data_from_pdf(pdf_path)
-    processed_data = process_text(pdf_text_lines, klasse)
+    
+    # Verarbeite die extrahierten Daten
+    processed_data = process_text(pdf_text_lines, klasse, extensions)
+    
+    print("Datenverarbeitung starten...")
+    
     try:
+        # Schreibe die verarbeiteten Daten in die CSV-Datei
         write_data_to_csv(processed_data, csv_path)
         print("Daten wurden erfolgreich in CSV exportiert.")
         messagebox.showinfo("Erfolg", "Daten wurden erfolgreich in CSV exportiert.")
@@ -114,7 +129,7 @@ def extract_data_from_pdf(pdf_path):
     return text, klasse
 
 
-def process_text(text_lines, klasse):
+def process_text(text_lines, klasse, extensions):
     data = []
     for line in text_lines:
         parts = line.split()
@@ -122,8 +137,21 @@ def process_text(text_lines, klasse):
             place = parts[0]
             nachname = parts[2]
             vorname = parts[3]
-            data.append([place, nachname, vorname, klasse])
+            # Extrahiere den Clubnamen
+            club_name = extract_club_name(line, extensions)
+            data.append([place, f"{vorname} {nachname}", club_name, klasse])
     return data
+
+def extract_club_name(line, extensions):
+    # Überprüfe, ob ein Clubname in der Zeile vorhanden ist
+    for extension in extensions:
+        if extension in line:
+            index = line.index(extension)
+            # Überprüfe, ob es sich um einen 6-stelligen Clubnamen handelt
+            if index > 0 and line[index - 1].isdigit() and len(line[index - 1]) == 6:
+                return ' '.join(parts[index - 1:index + 1])
+            return extension
+    return ""
 
 
 def write_data_to_csv(data, csv_path):

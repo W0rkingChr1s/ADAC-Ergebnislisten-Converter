@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, simpledialog
 import os
 import subprocess
 import csv
@@ -175,6 +175,45 @@ def extract_data_from_pdf(pdf_path):
         messagebox.showerror("Fehler", f"Fehler beim Extrahieren von Daten aus der PDF-Datei: {e}")
         return [], ""
 
+def prompt_user_for_missing_data(line):
+    missing_data = {}
+
+    def on_confirm():
+        missing_data['place'] = place_entry.get()
+        missing_data['fahrername'] = fahrername_entry.get()
+        missing_data['club'] = club_entry.get()
+
+        if not missing_data['place'] or not missing_data['fahrername'] or not missing_data['club']:
+            messagebox.showerror("Fehler", "Alle Felder müssen ausgefüllt werden.")
+            return
+        prompt_window.destroy()
+
+    prompt_window = tk.Toplevel(root)
+    prompt_window.title("Fehlende Daten eingeben")
+
+    tk.Label(prompt_window, text="Fehlende Daten in Zeile gefunden. Bitte ergänzen:").pack(pady=10)
+    
+    tk.Label(prompt_window, text=f"Zeile: {line}").pack()
+
+    tk.Label(prompt_window, text="Platz:").pack()
+    place_entry = tk.Entry(prompt_window, width=50)
+    place_entry.pack()
+
+    tk.Label(prompt_window, text="Fahrername:").pack()
+    fahrername_entry = tk.Entry(prompt_window, width=50)
+    fahrername_entry.pack()
+
+    tk.Label(prompt_window, text="Club:").pack()
+    club_entry = tk.Entry(prompt_window, width=50)
+    club_entry.pack()
+
+    tk.Button(prompt_window, text="Bestätigen", command=on_confirm).pack(pady=10)
+    
+    prompt_window.grab_set()
+    root.wait_window(prompt_window)
+    
+    return missing_data['place'], missing_data['fahrername'], missing_data['club']
+
 def process_text(text_lines, klasse, extensions):
     data = []
     try:
@@ -190,19 +229,18 @@ def process_text(text_lines, klasse, extensions):
                     license_index = next((i for i, part in enumerate(parts) if re.match(r'\d{6}', part)), len(parts))
                     if license_index == len(parts):
                         logging.warning(f"Keine Lizenznummer in Zeile gefunden: {line}")
-                        continue
+                        place, fahrername, club_name = prompt_user_for_missing_data(line)
+                    else:
+                        license_number = parts[license_index]
+                        # Bestimme den Clubnamen anhand der Extension
+                        club_name_parts = []
+                        for i in range(2, license_index):
+                            if any(parts[i].startswith(ext) for ext in extensions):
+                                club_name_parts = parts[i:license_index]
+                                break
 
-                    license_number = parts[license_index]
-
-                    # Bestimme den Clubnamen anhand der Extension
-                    club_name_parts = []
-                    for i in range(2, license_index):
-                        if any(parts[i].startswith(ext) for ext in extensions):
-                            club_name_parts = parts[i:license_index]
-                            break
-
-                    club_name = ' '.join(club_name_parts)
-                    fahrername = ' '.join(parts[2:license_index - len(club_name_parts)])  # Fahrernamen extrahieren, ohne Startnummer und Clubnamenerweiterung
+                        club_name = ' '.join(club_name_parts)
+                        fahrername = ' '.join(parts[2:license_index - len(club_name_parts)])  # Fahrernamen extrahieren, ohne Startnummer und Clubnamenerweiterung
 
                     data.append([place, fahrername, club_name, klasse])
                 except IndexError as e:

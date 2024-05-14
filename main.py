@@ -1,11 +1,35 @@
 import tkinter as tk
-from tkinter import messagebox, simpledialog, filedialog
+from tkinter import messagebox, filedialog
 import os
 import subprocess
 import csv
 from PyPDF2 import PdfReader
 import sys
 import platform
+import configparser
+import re
+import logging
+
+# Logging einrichten
+logging.basicConfig(
+    filename='converter.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Aktuelles Arbeitsverzeichnis ermitteln
+current_directory = os.path.dirname(os.path.abspath(__file__))
+
+def read_settings():
+    config = configparser.ConfigParser()
+    try:
+        config.read(os.path.join(current_directory, 'settings.ini'))
+        extensions = config['ClubExtensions']['extensions'].split(', ')
+        return extensions
+    except Exception as e:
+        logging.error(f"Fehler beim Lesen der Einstellungen: {e}")
+        messagebox.showerror("Fehler", "Fehler beim Lesen der Einstellungen.")
+        return []
 
 def get_csv_encoding():
     system = platform.system()
@@ -14,7 +38,6 @@ def get_csv_encoding():
     elif system == "Darwin":  # macOS
         return "macroman"
     else:
-        # Fallback auf UTF-8 für andere Betriebssysteme
         return "utf-8"
 
 if getattr(sys, 'frozen', False):
@@ -24,46 +47,75 @@ def install_and_import(package):
     try:
         __import__(package)
     except ImportError:
-        print(f"{package} ist nicht installiert. Installiere {package}...")
+        logging.warning(f"{package} ist nicht installiert. Installiere {package}...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
         __import__(package)
-
 
 # Installiere PyPDF2 falls nicht vorhanden
 install_and_import("PyPDF2")
 
-
 def open_file_dialog(type_label, entry_widget):
-    if type_label == "PDF":
-        filename = filedialog.askopenfilename(
-            filetypes=[
-                ("PDF files", "*.pdf")
+    try:
+        initial_dir = current_directory
+        if type_label == "PDF":
+            filename = filedialog.askopenfilename(
+                initialdir=initial_dir,
+                filetypes=[
+                    ("PDF files", "*.pdf")
                 ])
-    elif type_label == "CSV":
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[
-                ("CSV files", "*.csv")
+        elif type_label == "CSV":
+            filename = filedialog.asksaveasfilename(
+                initialdir=initial_dir,
+                defaultextension=".csv", filetypes=[
+                    ("CSV files", "*.csv")
                 ]
-        )
-    elif type_label == "Word":
-        filename = filedialog.askopenfilename(
-            filetypes=[
-                ("Word Templates (*.dotx)", "*.dotx"),
-                ("Word Documents (*.docx)", "*.docx"),
-                ("All Files", "*"),
-            ]
-        )
-    entry_widget.delete(0, tk.END)
-    entry_widget.insert(0, filename)
+            )
+        elif type_label == "Word":
+            filename = filedialog.askopenfilename(
+                initialdir=initial_dir,
+                filetypes=[
+                    ("Word Templates (*.dotx)", "*.dotx"),
+                    ("Word Documents (*.docx)", "*.docx"),
+                    ("All Files", "*"),
+                ]
+            )
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, filename)
+    except Exception as e:
+        logging.error(f"Fehler im Dateidialog: {e}")
+        messagebox.showerror("Fehler", f"Fehler im Dateidialog: {e}")
 
+def remove_extension_and_following_string(file_name, extensions):
+    try:
+        for ext in extensions:
+            if file_name.endswith(ext):
+                file_name = re.sub(rf'{ext}.*?(?=\d)', ext, file_name)
+                break
+        return file_name
+    except Exception as e:
+        logging.error(f"Fehler beim Entfernen der Erweiterung: {e}")
+        messagebox.showerror("Fehler", f"Fehler beim Entfernen der Erweiterung: {e}")
+        return file_name
 
 def execute_script(pdf_path, csv_path, word_path):
-    print("Datenverarbeitung starten...")
-    pdf_text_lines, klasse = extract_data_from_pdf(pdf_path)
-    processed_data = process_text(pdf_text_lines, klasse)
+    extensions = read_settings()
+    
+    pdf_path = remove_extension_and_following_string(pdf_path, extensions)
+    csv_path = remove_extension_and_following_string(csv_path, extensions)
+    word_path = remove_extension_and_following_string(word_path, extensions)
+    
+    try:
+        pdf_text_lines, klasse = extract_data_from_pdf(pdf_path)
+        processed_data = process_text(pdf_text_lines, klasse, extensions)
+        logging.info("Datenverarbeitung erfolgreich abgeschlossen.")
+    except Exception as e:
+        logging.error(f"Fehler bei der Datenverarbeitung: {e}")
+        messagebox.showerror("Fehler", f"Fehler bei der Datenverarbeitung: {e}")
+        return
+    
     try:
         write_data_to_csv(processed_data, csv_path)
-        print("Daten wurden erfolgreich in CSV exportiert.")
+        logging.info("Daten wurden erfolgreich in CSV exportiert.")
         messagebox.showinfo("Erfolg", "Daten wurden erfolgreich in CSV exportiert.")
     except PermissionError:
         retry = messagebox.askretrycancel(
@@ -72,79 +124,109 @@ def execute_script(pdf_path, csv_path, word_path):
         )
         if retry:
             csv_path = filedialog.asksaveasfilename(
+                initialdir=current_directory,
                 defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
             )
             execute_script(pdf_path, csv_path, word_path)
-
+        else:
+            logging.error("Speichern der Datei abgebrochen aufgrund von Berechtigungsfehlern.")
+    
     if word_path:
         try:
             if sys.platform == "win32":
                 os.startfile(word_path)
             elif sys.platform == "darwin":
-                subprocess.call(["open", word_path])  # Verwende 'open' auf macOS
+                subprocess.call(["open", word_path])
             else:
-                subprocess.call(
-                    ["xdg-open", word_path]
-                )  # Verwende 'xdg-open' auf Linux
+                subprocess.call(["xdg-open", word_path])
         except Exception as e:
-            print(f"Fehler beim Öffnen der Datei: {e}")
-            messagebox.showerror("Fehler beim Öffnen der Datei: {e}")
-    
-    # Programm beenden, nachdem Word geöffnet wurde
+            logging.error(f"Fehler beim Öffnen der Datei: {e}")
+            messagebox.showerror(f"Fehler beim Öffnen der Datei: {e}")
+
     sys.exit()
 
-
 def close_application():
+    logging.info("Anwendung wird beendet.")
     root.quit()
 
-
 def extract_data_from_pdf(pdf_path):
-    with open(pdf_path, "rb") as file:
-        reader = PdfReader(file)
-        text = []
-        klasse = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            text.extend(page_text.split("\n"))
-            if "Klasse: K" in page_text and not klasse:
-                klasse_line = [
-                    line for line in page_text.split("\n") if "Klasse: K" in line
-                ][0]
-                klasse = klasse_line.split("Klasse: K")[1].strip().split()[0]
-    return text, klasse
+    try:
+        with open(pdf_path, "rb") as file:
+            reader = PdfReader(file)
+            text = []
+            klasse = ""
+            for page in reader.pages:
+                page_text = page.extract_text()
+                text.extend(page_text.split("\n"))
+                if "Klasse: K" in page_text and not klasse:
+                    klasse_line = [
+                        line for line in page_text.split("\n") if "Klasse: K" in line
+                    ][0]
+                    klasse = klasse_line.split("Klasse: K")[1].strip().split()[0]
+        return text, klasse
+    except Exception as e:
+        logging.error(f"Fehler beim Extrahieren von Daten aus der PDF-Datei: {e}")
+        messagebox.showerror("Fehler", f"Fehler beim Extrahieren von Daten aus der PDF-Datei: {e}")
+        return [], ""
 
-
-def process_text(text_lines, klasse):
+def process_text(text_lines, klasse, extensions):
     data = []
-    for line in text_lines:
-        parts = line.split()
-        if parts and parts[0].isdigit() and len(parts) > 3:
-            place = parts[0]
-            nachname = parts[2]
-            vorname = parts[3]
-            data.append([place, nachname, vorname, klasse])
-    return data
+    try:
+        for line in text_lines:
+            parts = line.split()
+            if len(parts) < 5:
+                continue  # Zeile überspringen, wenn sie zu kurz ist
 
+            if parts[0].isdigit():
+                try:
+                    place = parts[0]
+                    startnummer = parts[1]
+                    license_index = next((i for i, part in enumerate(parts) if re.match(r'\d{6}', part)), len(parts))
+                    if license_index == len(parts):
+                        logging.warning(f"Keine Lizenznummer in Zeile gefunden: {line}")
+                        continue
+
+                    license_number = parts[license_index]
+
+                    # Bestimme den Clubnamen anhand der Extension
+                    club_name_parts = []
+                    for i in range(2, license_index):
+                        if any(parts[i].startswith(ext) for ext in extensions):
+                            club_name_parts = parts[i:license_index]
+                            break
+
+                    club_name = ' '.join(club_name_parts)
+                    fahrername = ' '.join(parts[2:license_index - len(club_name_parts)])  # Fahrernamen extrahieren, ohne Startnummer und Clubnamenerweiterung
+
+                    data.append([place, fahrername, club_name, klasse])
+                except IndexError as e:
+                    logging.error(f"Fehler beim Verarbeiten der Zeile: {line} - {e}")
+                    continue
+        return data
+    except Exception as e:
+        logging.error(f"Fehler beim Verarbeiten des Textes: {e}")
+        messagebox.showerror("Fehler", f"Fehler beim Verarbeiten des Textes: {e}")
+        return data
 
 def write_data_to_csv(data, csv_path):
     encoding = get_csv_encoding()
-    with open(csv_path, mode='w', newline='', encoding=encoding) as file:
-        writer = csv.writer(file, delimiter=';')
-        writer.writerow(['Platz', 'Nachname', 'Vorname', 'Klasse'])
-        for record in data:
-            # Konvertiere alle Datensätze entsprechend des Encoders, um Sonderzeichen korrekt zu behandeln
-            record_encoded = [
-                item.encode(encoding, errors='replace').decode(encoding) if isinstance(item, str) else item
-                for item in record
-            ]
-            writer.writerow(record_encoded)
-
+    try:
+        with open(csv_path, mode='w', newline='', encoding=encoding) as file:
+            writer = csv.writer(file, delimiter=';')
+            writer.writerow(['Platz', 'Fahrername', 'Club', 'Klasse'])
+            for record in data:
+                record_encoded = [
+                    item.encode(encoding, errors='replace').decode(encoding) if isinstance(item, str) else item
+                    for item in record
+                ]
+                writer.writerow(record_encoded)
+    except Exception as e:
+        logging.error(f"Fehler beim Schreiben der CSV-Datei: {e}")
+        messagebox.showerror("Fehler", f"Fehler beim Schreiben der CSV-Datei: {e}")
 
 class App:
     def __init__(self, root):
-        # setting title
         root.title("ADAC-Ergebnislisten Converter")
-        # setting window size
         width = 410
         height = 200
         screenwidth = root.winfo_screenwidth()
@@ -190,7 +272,6 @@ class App:
             self.pdf_entry.get(), self.csv_entry.get(), self.word_entry.get()
         )
 
-
 if __name__ == "__main__":
     root = tk.Tk()
     app = App(root)
@@ -199,4 +280,5 @@ if __name__ == "__main__":
     root.after_idle(root.attributes, '-topmost', False)  # Setze das Fenster wieder normal, wenn das Fenster idle ist
     if getattr(sys, 'frozen', False):
         pyi_splash.close()
+    logging.info("Anwendung gestartet.")
     root.mainloop()

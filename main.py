@@ -10,9 +10,15 @@ import configparser
 import re
 import logging
 
+# Benutzerverzeichnis ermitteln
+user_directory = os.path.expanduser("~")
+log_directory = os.path.join(user_directory, 'ADAC_Logs')
+os.makedirs(log_directory, exist_ok=True)
+
 # Logging einrichten
+log_file = os.path.join(log_directory, 'converter.log')
 logging.basicConfig(
-    filename='converter.log',
+    filename=log_file,
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
